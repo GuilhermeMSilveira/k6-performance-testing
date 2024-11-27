@@ -8,24 +8,32 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 // Importando a classe 'Trend' para medir a duração da requisição
 import { Trend } from 'k6/metrics';
+// Importando a classe 'Rate' para medir o percentual de requisições falhas
+import { Rate } from 'k6/metrics';
 
 // Criando uma métrica para medir o tempo de duração das requisições feitas ao endpoint de raças de cães
 export const getBreedsDuration = new Trend('get_breeds_duration', true);
+// Criando uma métrica para medir as falhas nas requisições
+export const errorRate = new Rate('error_rate');
 
 // Configurações do teste
 export const options = {
   // Definindo limiares de performance
   thresholds: {
-    // Percentual de falhas nas requisições deve ser menor que 5%
-    http_req_failed: ['rate<0.05'],
-    // A duração média das requisições HTTP deve ser menor que 10 segundos
-    http_req_duration: ['avg<10000']
+    // 95% das requisições devem ter um tempo de resposta inferior a 5700ms
+    http_req_duration: ['p(95)<5700'], // Usando p(95) para indicar 95% das requisições
+    // A taxa de falhas deve ser menor que 12%
+    http_req_failed: ['rate<0.12']
   },
   // Definindo as fases do teste (simulando aumento de carga)
   stages: [
-    { duration: '1m', target: 50 }, // Subindo para 50 usuários em 1 minuto
-    { duration: '2m', target: 100 }, // Estabilizando em 100 usuários por 2 minutos
-    { duration: '1m', target: 0 } // Reduzindo para 0 usuários em 1 minuto
+    { duration: '43s', target: 10 }, // Inicia com 10 usuários
+    { duration: '43s', target: 50 }, // Aumenta para 50 usuários
+    { duration: '43s', target: 100 }, // Aumenta para 100 usuários
+    { duration: '43s', target: 150 }, // Aumenta para 150 usuários
+    { duration: '43s', target: 200 }, // Aumenta para 200 usuários
+    { duration: '43s', target: 250 }, // Aumenta para 250 usuários
+    { duration: '42s', target: 300 } // Atinge o máximo de 300 usuários
   ]
 };
 
@@ -71,13 +79,19 @@ export default function () {
     responseBody = {}; // Define um objeto vazio caso haja erro
   }
 
-  // Simulando falhas aleatórias (falha em 5% dos casos)
-  const randomFailure = Math.random() < 0.05;
+  // Verificando se a resposta foi bem-sucedida
+  const isSuccessful = res.status === OK && responseBody.message !== undefined;
 
   // Validando a resposta da requisição (status 200 e dados presentes na resposta)
   check(res, {
     'GET Breeds - Status 200': () => res.status === OK,
-    'GET Breeds - Contains Breeds': () =>
-      !randomFailure && responseBody.message !== undefined
+    'GET Breeds - Contains Breeds': () => responseBody.message !== undefined
   });
+
+  // Registra a falha na métrica 'errorRate' se a requisição não foi bem-sucedida
+  if (!isSuccessful) {
+    errorRate.add(1); // Adiciona falha
+  } else {
+    errorRate.add(0); // Adiciona sucesso
+  }
 }
